@@ -660,11 +660,15 @@ async def execute_read(
             "start_known": start_known,
             "end_known": end_known,
             "include_updates": include_updates,
-            "bucket_us": bucket_us,
-            "bucket_dedup": bucket_dedup,
             "include_knowledge_time": include_knowledge_time,
         }
     )
+    if not relative and bucket_us is not None:
+        # Only forwarded when asked for: older timedb releases do not accept
+        # these keywords at all, and ``bucket_dedup`` means nothing without a
+        # bucket to dedupe into.
+        kwargs["bucket_us"] = bucket_us
+        kwargs["bucket_dedup"] = bucket_dedup
 
     missing = pl.DataFrame()
 

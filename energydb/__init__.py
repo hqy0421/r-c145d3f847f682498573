@@ -87,6 +87,7 @@ from energydb.errors import (  # noqa: E402
     UnknownElementTypeError,
     ValidationError,
 )
+from energydb.ranges import RangeRead  # noqa: E402
 from energydb.scope import EdgeScope, NodeScope  # noqa: E402
 from energydb.units import IncompatibleUnitError  # noqa: E402
 
@@ -97,6 +98,7 @@ __all__ = [
     "NodeScope",
     "EdgeScope",
     "Transaction",
+    "RangeRead",
     "ReadResult",
     "WriteResult",
     # By-path result keys

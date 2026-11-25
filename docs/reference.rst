@@ -59,6 +59,15 @@ Returned by :meth:`Client.read <energydb.AsyncClient.read>` /
    :members:
    :show-inheritance:
 
+Returned by :meth:`Client.read_ranges <energydb.AsyncClient.read_ranges>`: the
+per-entry aggregates (carrying ``effective_count``), the per-entry summary of
+disjoint denominators, and the structurally-retained unconfirmed members. A
+``NamedTuple``, so it unpacks as ``data, summary, unconfirmed``.
+
+.. autoclass:: energydb.RangeRead
+   :members:
+   :show-inheritance:
+
 Reads with ``output="by_path"`` return a ``dict`` keyed by one of these
 ``NamedTuple``\ s — node-routed reads by :class:`~energydb.SeriesKey`,
 edge-routed reads by :class:`~energydb.EdgeSeriesKey`. Both support

@@ -734,6 +734,11 @@ For edge reads, the hierarchy columns are ``from_path``, ``to_path`` (both
 own name, always present and null for unnamed edges. It is what tells two
 parallel circuits' rows apart; see `Parallel Edges (Multigraph)`_.
 
+To roll several overlapping sub-trees up into per-entry aggregates — deduped
+by stable series id, each aggregate carrying its effective series count —
+:meth:`Client.read_ranges <energydb.AsyncClient.read_ranges>` reads all of them
+in one pass; see `Aggregating overlapping ranges`_.
+
 .. note::
 
    **Scope auto-strip.** When a scope ``.read()`` resolves to a single
@@ -1015,6 +1020,65 @@ name="power")``).
 The ``backend=`` kwarg is orthogonal: ``backend="polars"`` (default)
 returns polars frames in both modes; ``backend="pandas"`` converts every
 frame at the boundary.
+
+
+Aggregating overlapping ranges
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A run report usually rolls site data up **per park** while also publishing a
+few sub-ranges as their own entries, so the same site is selected by several
+entries at once. :meth:`Client.read_ranges <energydb.AsyncClient.read_ranges>`
+aggregates a named set of node ranges in one read:
+
+.. code-block:: python
+
+   report = client.read_ranges(
+       {
+           "ParkA": "Parks/ParkA",                      # a whole sub-tree
+           "ParkA/S1": client.get_node("Parks/ParkA/S1"),  # a sub-range of it
+           "ParkB": ["Parks/ParkB", "Parks/ParkB-2"],   # an entry spanning sites
+       },
+       data_type="actual",
+       name="power",
+       agg="mean",
+       bucket_us=3600 * 1_000_000,      # hourly buckets, optional
+   )
+
+   report.data          # (entry, valid_time, value, effective_count)
+   report.summary       # (entry, resolved, effective, zero_observation,
+                        #  unconfirmed, complete), one row per entry
+   report.unconfirmed   # (entry, path, data_type, name, reason) per gap
+
+Identity is the stable ``series_id``, never the path or name: a series selected
+by both ``ParkA`` and ``ParkA/S1`` is resolved once, read from ClickHouse once
+over the union of member ids, and contributes to each entry exactly once. Two
+nodes that happen to share a name never collide.
+
+The aggregate row carries its own denominator. ``effective_count`` on each
+``data`` row is the number of *distinct* series that actually produced an
+observation in that bucket — not the number of series that merely resolved — so
+"mean across the park" is always over a known, honest set. In ``summary`` the
+denominators are disjoint by construction, ``resolved == effective +
+zero_observation``, and ``complete`` is ``unconfirmed == 0``.
+
+Reads are *reported*, not silently truncated. A range root that does not exist,
+or an instrumented node with no series matching ``data_type`` / ``name``, is
+retained on ``unconfirmed`` and counted in its own ``unconfirmed`` column —
+kept structurally apart from ``zero_observation``, which means "this member
+resolved but reported nothing in the window". A member we could not confirm is
+never folded into a denominator it did not earn. ``on_missing`` therefore
+defaults to ``"skip"`` here (the result *is* the completeness report); pass
+``"raise"`` to fail on the first gap with
+:class:`~energydb.errors.NodeNotFoundError` or
+:class:`~energydb.errors.SeriesNotFoundError` instead.
+
+``agg`` is one of ``"sum"`` (default), ``"mean"``, ``"min"``, ``"max"``,
+``"count"``; ``count`` counts observations, while ``effective_count`` always
+counts distinct contributing series. ``unit=`` converts each series from its
+canonical unit before aggregating; without it, aggregating series that carry
+different canonical units raises rather than summing incompatible quantities.
+``output="by_entry"`` returns a ``{entry: DataFrame}`` dict instead of one
+frame, with every entry present even when it has no rows.
 
 
 Atomic batches with ``transaction()``

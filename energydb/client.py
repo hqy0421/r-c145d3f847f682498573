@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -43,6 +43,7 @@ from sqlalchemy import create_engine
 from timedatamodel import DataType, TimeSeries, TimeSeriesType
 from timedb import TimeDBClient, UnchangedScope, profiling
 
+from energydb import ranges as ranges_mod
 from energydb import runs as runs_mod
 from energydb._ch_meta_engine import (
     CH_ENGINE_TABLE,
@@ -289,7 +290,7 @@ class AsyncClient:
         await asyncio.to_thread(self._create_blocking)
         try:
             await asyncio.to_thread(self._provision_engine_table_blocking)
-        except Exception:  # noqa: BLE001  (best-effort; engine reads degrade to sequential)
+        except Exception:
             logger.warning(
                 "could not provision the ClickHouse meta engine table; reads will use the sequential path",
                 exc_info=True,
@@ -1190,6 +1191,60 @@ class AsyncClient:
             # always a plain frame; narrow before it lands on ReadResult.missing.
             return ReadResult(data, cast("pl.DataFrame | pd.DataFrame", to_backend(missing, backend)))
         return data
+
+    async def read_ranges(
+        self,
+        ranges: Mapping[str, Any] | Sequence[tuple[str, Any]],
+        *,
+        data_type: str | None = None,
+        name: str | None = None,
+        unit: str | None = None,
+        agg: ranges_mod.Aggregation = "sum",
+        bucket_us: int | None = None,
+        start_valid: datetime | None = None,
+        end_valid: datetime | None = None,
+        start_known: datetime | None = None,
+        end_known: datetime | None = None,
+        output: ranges_mod.RangeOutput = "frame",
+        backend: Backend = "polars",
+        on_missing: OnMissing = "skip",
+    ) -> ranges_mod.RangeRead:
+        """Aggregate several (possibly overlapping) node ranges, deduped by series.
+
+        ``ranges`` maps an entry name to a :class:`~energydb.NodeScope`, a
+        ``/``-joined path, or a sequence of those. Entries may overlap: a site
+        selected by both the park and its own sub-range is resolved once, read
+        once, and contributes to each entry exactly once (identity is the
+        stable ``series_id``, never the path or name).
+
+        Returns a :class:`~energydb.RangeRead` of ``(data, summary,
+        unconfirmed)``: ``data`` carries per-entry aggregates with an
+        ``effective_count`` (distinct *contributing* series), ``summary``
+        reports ``resolved`` / ``effective`` / ``zero_observation`` as
+        disjoint denominators per entry, and ``unconfirmed`` retains members
+        that could not be resolved — separately, never counted as zero
+        observations. ``on_missing`` defaults to ``"skip"`` because the result
+        *is* the completeness report; pass ``"raise"`` to fail on the first
+        gap instead.
+
+        See :func:`energydb.ranges.read_ranges` for the full semantics.
+        """
+        return await ranges_mod.read_ranges(
+            self,
+            ranges,
+            data_type=data_type,
+            name=name,
+            unit=unit,
+            agg=agg,
+            bucket_us=bucket_us,
+            start_valid=start_valid,
+            end_valid=end_valid,
+            start_known=start_known,
+            end_known=end_known,
+            output=output,
+            backend=backend,
+            on_missing=on_missing,
+        )
 
     async def read_runs_for_series(self, *, series_id: int) -> list[dict[str, Any]]:
         """Return runs that wrote data for a given series_id, latest first."""
